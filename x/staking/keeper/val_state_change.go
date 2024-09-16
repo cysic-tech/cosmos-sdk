@@ -24,10 +24,12 @@ func (k Keeper) BlockValidatorUpdates(ctx sdk.Context) []abci.ValidatorUpdate {
 	// unbonded after the Endblocker (go from Bonded -> Unbonding during
 	// ApplyAndReturnValidatorSetUpdates and then Unbonding -> Unbonded during
 	// UnbondAllMatureValidatorQueue).
-	validatorUpdates, err := k.ApplyAndReturnValidatorSetUpdates(ctx)
-	if err != nil {
-		panic(err)
-	}
+
+	// NOTE: this election will replace in customstaking
+	// validatorUpdates, err := k.ApplyAndReturnValidatorSetUpdates(ctx)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// unbond all mature validators from the unbonding queue
 	k.UnbondAllMatureValidators(ctx)
@@ -90,7 +92,9 @@ func (k Keeper) BlockValidatorUpdates(ctx sdk.Context) []abci.ValidatorUpdate {
 		)
 	}
 
-	return validatorUpdates
+	// return validatorUpdates
+	// Return an empty validator update list to prevent any changes in the validator set.
+	return []abci.ValidatorUpdate{}
 }
 
 // ApplyAndReturnValidatorSetUpdates applies and return accumulated updates to the bonded validator set. Also,
