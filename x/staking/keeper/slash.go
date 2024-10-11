@@ -30,6 +30,9 @@ import (
 //	Infraction was committed at the current height or at a past height,
 //	not at a height in the future
 func (k Keeper) Slash(ctx sdk.Context, consAddr sdk.ConsAddress, infractionHeight int64, power int64, slashFactor sdk.Dec) math.Int {
+	return sdk.NewInt(0)
+
+	/* Note: This function is currently not used.
 	logger := k.Logger(ctx)
 
 	if slashFactor.IsNegative() {
@@ -149,6 +152,7 @@ func (k Keeper) Slash(ctx sdk.Context, consAddr sdk.ConsAddress, infractionHeigh
 		"burned", tokensToBurn,
 	)
 	return tokensToBurn
+	*/
 }
 
 // jail a validator

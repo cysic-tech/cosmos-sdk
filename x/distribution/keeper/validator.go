@@ -26,6 +26,9 @@ func (k Keeper) initializeValidator(ctx sdk.Context, val stakingtypes.ValidatorI
 
 // increment validator period, returning the period just ended
 func (k Keeper) IncrementValidatorPeriod(ctx sdk.Context, val stakingtypes.ValidatorI) uint64 {
+	// NOTE: always return 0
+	return 0
+	/* Note: This function is currently not used.
 	// fetch current rewards
 	rewards := k.GetValidatorCurrentRewards(ctx, val.GetOperator())
 
@@ -61,6 +64,7 @@ func (k Keeper) IncrementValidatorPeriod(ctx sdk.Context, val stakingtypes.Valid
 	k.SetValidatorCurrentRewards(ctx, val.GetOperator(), types.NewValidatorCurrentRewards(sdk.DecCoins{}, rewards.Period+1))
 
 	return rewards.Period
+	*/
 }
 
 // increment the reference count for a historical rewards value
