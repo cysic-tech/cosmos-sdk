@@ -5,10 +5,11 @@ import (
 )
 
 // create a new DelegatorStartingInfo
-func NewDelegatorStartingInfo(previousPeriod uint64, stake sdk.Dec, height uint64) DelegatorStartingInfo {
+func NewDelegatorStartingInfo(previousPeriod uint64, stake sdk.Dec, height uint64, cumulativeRewards sdk.Dec) DelegatorStartingInfo {
 	return DelegatorStartingInfo{
-		PreviousPeriod: previousPeriod,
-		Stake:          stake,
-		Height:         height,
+		PreviousPeriod:    previousPeriod,
+		Stake:             stake,
+		Height:            height,
+		CumulativeRewards: cumulativeRewards,
 	}
 }

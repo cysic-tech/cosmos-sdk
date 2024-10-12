@@ -1,6 +1,8 @@
 package keeper
 
 import (
+	"fmt"
+
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	"github.com/cosmos/cosmos-sdk/x/distribution/types"
@@ -13,7 +15,7 @@ func (k Keeper) initializeDelegation(ctx sdk.Context, val sdk.ValAddress, del sd
 	previousPeriod := k.GetValidatorCurrentRewards(ctx, val).Period - 1
 
 	// increment reference count for the period we're going to track
-	k.incrementReferenceCount(ctx, val, previousPeriod)
+	// k.incrementReferenceCount(ctx, val, previousPeriod)
 
 	validator := k.stakingKeeper.Validator(ctx, val)
 	delegation := k.stakingKeeper.Delegation(ctx, del, val)
@@ -21,8 +23,22 @@ func (k Keeper) initializeDelegation(ctx sdk.Context, val sdk.ValAddress, del sd
 	// calculate delegation stake in tokens
 	// we don't store directly, so multiply delegation shares * (tokens per share)
 	// note: necessary to truncate so we don't allow withdrawing more rewards than owed
-	stake := validator.TokensFromSharesTruncated(delegation.GetShares())
-	k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, stake, uint64(ctx.BlockHeight())))
+	/*
+		stake := validator.TokensFromSharesTruncated(delegation.GetShares())
+		k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, stake, uint64(ctx.BlockHeight())))
+	*/
+
+	currentStake := validator.TokensFromSharesTruncated(delegation.GetShares())
+	found := k.HasDelegatorStartingInfo(ctx, val, del)
+	if found {
+		existingInfo := k.GetDelegatorStartingInfo(ctx, val, del)
+		existingInfo.Stake = currentStake
+		k.SetDelegatorStartingInfo(ctx, val, del, existingInfo)
+
+	} else {
+		k.incrementReferenceCount(ctx, val, previousPeriod)
+		k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, currentStake, uint64(ctx.BlockHeight()), sdk.ZeroDec()))
+	}
 }
 
 // calculate the rewards accrued by a delegation between two periods
@@ -64,10 +80,21 @@ func (k Keeper) CalculateDelegationRewards(ctx sdk.Context, val stakingtypes.Val
 		return
 	}
 
-	// calculate rewards from starting period (0), subtract 1 to account for the fact that the
-	// starting period is the previous period
+	baseDenom, _ := sdk.GetBaseDenom()
+	if baseDenom == "" {
+		baseDenom = sdk.DefaultBondDenom
+	}
+
+	// calculate rewards from starting period (0)
 	// CYSIC rewards CYS by CC and delegate stCYS
-	return sdk.DecCoins{sdk.NewDecCoinFromDec(stakingtypes.DefaultParams().BondDenom, startingInfo.Stake.Sub(sdk.OneDec()))}
+	cumulativeRewards := sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}
+
+	rewardsCoins, _ := cumulativeRewards.TruncateDecimal()
+	if rewardsCoins.IsZero() {
+		return
+	}
+
+	return cumulativeRewards
 
 	/* Note: This function is currently not used.
 	startingPeriod := startingInfo.PreviousPeriod
@@ -159,29 +186,40 @@ func (k Keeper) withdrawDelegationRewards(ctx sdk.Context, val stakingtypes.Vali
 	// get delegator starting info
 	startingInfo := k.GetDelegatorStartingInfo(ctx, valAddr, delAddr)
 
-	// calculate rewards from starting period (0), subtract 1 to account for the fact that the
-	// starting period is the previous period
+	baseDenom, _ := sdk.GetBaseDenom()
+	if baseDenom == "" {
+		baseDenom = sdk.DefaultBondDenom
+	}
+
+	// calculate rewards from starting period (0)
 	// CYSIC rewards CYS by CC and delegate stCYS
-	rewards := sdk.DecCoins{sdk.NewDecCoinFromDec(stakingtypes.DefaultParams().BondDenom, startingInfo.Stake.Sub(sdk.OneDec()))}
+	rewards := sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}
 
 	if rewards.IsAnyNegative() {
-		baseDenom, _ := sdk.GetBaseDenom()
-		if baseDenom == "" {
-			baseDenom = sdk.DefaultBondDenom
-		}
 		rewards = sdk.DecCoins{sdk.NewDecCoin(baseDenom, sdk.ZeroInt())}
 	}
 
 	// convert calculated rewards to sdk.Coins and return to delegator
 	rewardsCoins, _ := rewards.TruncateDecimal()
 
+	if rewardsCoins.IsZero() {
+		k.Logger(ctx).Error(fmt.Sprintf("Delegator %s has zero rewards on validator %s", delAddr, valAddr))
+		return rewardsCoins, nil
+	}
+
+	for _, rewardCoin := range rewards {
+		outstandingRewardAmount := outstandingRewards.Rewards.AmountOf(rewardCoin.Denom)
+		if outstandingRewardAmount.LT(rewardCoin.Amount) {
+			k.Logger(ctx).Error(fmt.Sprintf("Validator %s has insufficient outstanding rewards to pay delegator %s - %s < %s", valAddr, delAddr, outstandingRewardAmount, rewardCoin))
+			return nil, sdkerrors.Wrapf(sdkerrors.ErrInsufficientFunds, "insufficient validator rewards for denom %s", rewardCoin.Denom)
+		}
+	}
+
 	// update validator's remaining rewards
 	outstandingRewards.Rewards = outstandingRewards.Rewards.Sub(rewards)
 	k.SetValidatorOutstandingRewards(ctx, del.GetValidatorAddr(), outstandingRewards)
 
-	if rewardsCoins.IsZero() {
-		return nil, sdkerrors.Wrap(sdkerrors.ErrInsufficientFunds, "zero rewards")
-	}
+	// send rewards to delegator
 	withdrawAddr := k.GetDelegatorWithdrawAddr(ctx, del.GetDelegatorAddr())
 	if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, withdrawAddr, rewardsCoins); err != nil {
 		return nil, err
