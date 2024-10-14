@@ -36,7 +36,6 @@ func (k Keeper) initializeDelegation(ctx sdk.Context, val sdk.ValAddress, del sd
 		k.SetDelegatorStartingInfo(ctx, val, del, existingInfo)
 
 	} else {
-		k.incrementReferenceCount(ctx, val, previousPeriod)
 		k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, currentStake, uint64(ctx.BlockHeight()), sdk.ZeroDec()))
 	}
 }
