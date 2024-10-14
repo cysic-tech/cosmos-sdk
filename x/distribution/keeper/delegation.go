@@ -15,7 +15,7 @@ func (k Keeper) initializeDelegation(ctx sdk.Context, val sdk.ValAddress, del sd
 	previousPeriod := k.GetValidatorCurrentRewards(ctx, val).Period - 1
 
 	// increment reference count for the period we're going to track
-	// k.incrementReferenceCount(ctx, val, previousPeriod)
+	k.incrementReferenceCount(ctx, val, previousPeriod)
 
 	validator := k.stakingKeeper.Validator(ctx, val)
 	delegation := k.stakingKeeper.Delegation(ctx, del, val)
@@ -33,6 +33,7 @@ func (k Keeper) initializeDelegation(ctx sdk.Context, val sdk.ValAddress, del sd
 	if found {
 		existingInfo := k.GetDelegatorStartingInfo(ctx, val, del)
 		existingInfo.Stake = currentStake
+		existingInfo.PreviousPeriod = previousPeriod
 		k.SetDelegatorStartingInfo(ctx, val, del, existingInfo)
 
 	} else {
@@ -180,6 +181,10 @@ func (k Keeper) withdrawDelegationRewards(ctx sdk.Context, val stakingtypes.Vali
 	valAddr := del.GetValidatorAddr()
 	delAddr := del.GetDelegatorAddr()
 
+	// end current period and calculate rewards
+	endingPeriod := k.IncrementValidatorPeriod(ctx, val)
+	_ = k.CalculateDelegationRewards(ctx, val, del, endingPeriod)
+
 	outstandingRewards := k.GetValidatorOutstandingRewards(ctx, valAddr)
 
 	// get delegator starting info
@@ -223,6 +228,10 @@ func (k Keeper) withdrawDelegationRewards(ctx sdk.Context, val stakingtypes.Vali
 	if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, withdrawAddr, rewardsCoins); err != nil {
 		return nil, err
 	}
+
+	// decrement reference count of starting period
+	startingPeriod := startingInfo.PreviousPeriod
+	k.decrementReferenceCount(ctx, del.GetValidatorAddr(), startingPeriod)
 
 	// clear delegator starting info
 	k.DeleteDelegatorStartingInfo(ctx, valAddr, delAddr)

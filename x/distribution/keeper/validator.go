@@ -27,11 +27,11 @@ func (k Keeper) initializeValidator(ctx sdk.Context, val stakingtypes.ValidatorI
 // increment validator period, returning the period just ended
 func (k Keeper) IncrementValidatorPeriod(ctx sdk.Context, val stakingtypes.ValidatorI) uint64 {
 	// NOTE: always return 0
-	return 0
-	/* Note: This function is currently not used.
+	// return 0
 	// fetch current rewards
 	rewards := k.GetValidatorCurrentRewards(ctx, val.GetOperator())
 
+	/* Note: rewards calculation changed
 	// calculate current ratio
 	var current sdk.DecCoins
 	if val.GetTokens().IsZero() {
@@ -50,6 +50,7 @@ func (k Keeper) IncrementValidatorPeriod(ctx sdk.Context, val stakingtypes.Valid
 		// note: necessary to truncate so we don't allow withdrawing more rewards than owed
 		current = rewards.Rewards.QuoDecTruncate(sdk.NewDecFromInt(val.GetTokens()))
 	}
+	*/
 
 	// fetch historical rewards for last period
 	historical := k.GetValidatorHistoricalRewards(ctx, val.GetOperator(), rewards.Period-1).CumulativeRewardRatio
@@ -57,6 +58,7 @@ func (k Keeper) IncrementValidatorPeriod(ctx sdk.Context, val stakingtypes.Valid
 	// decrement reference count
 	k.decrementReferenceCount(ctx, val.GetOperator(), rewards.Period-1)
 
+	current := sdk.DecCoins{}
 	// set new historical rewards with reference count of 1
 	k.SetValidatorHistoricalRewards(ctx, val.GetOperator(), rewards.Period, types.NewValidatorHistoricalRewards(historical.Add(current...), 1))
 
@@ -64,7 +66,6 @@ func (k Keeper) IncrementValidatorPeriod(ctx sdk.Context, val stakingtypes.Valid
 	k.SetValidatorCurrentRewards(ctx, val.GetOperator(), types.NewValidatorCurrentRewards(sdk.DecCoins{}, rewards.Period+1))
 
 	return rewards.Period
-	*/
 }
 
 // increment the reference count for a historical rewards value
