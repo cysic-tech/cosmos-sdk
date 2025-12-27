@@ -23,21 +23,21 @@ func (k Keeper) initializeDelegation(ctx sdk.Context, val sdk.ValAddress, del sd
 	// calculate delegation stake in tokens
 	// we don't store directly, so multiply delegation shares * (tokens per share)
 	// note: necessary to truncate so we don't allow withdrawing more rewards than owed
-	/*
+	if sdk.IsLazyDistributionEnabled(ctx) {
 		stake := validator.TokensFromSharesTruncated(delegation.GetShares())
-		k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, stake, uint64(ctx.BlockHeight())))
-	*/
-
-	currentStake := validator.TokensFromSharesTruncated(delegation.GetShares())
-	found := k.HasDelegatorStartingInfo(ctx, val, del)
-	if found {
-		existingInfo := k.GetDelegatorStartingInfo(ctx, val, del)
-		existingInfo.Stake = currentStake
-		existingInfo.PreviousPeriod = previousPeriod
-		k.SetDelegatorStartingInfo(ctx, val, del, existingInfo)
-
+		k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, stake, uint64(ctx.BlockHeight()), sdk.ZeroDec()))
 	} else {
-		k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, currentStake, uint64(ctx.BlockHeight()), sdk.ZeroDec()))
+		currentStake := validator.TokensFromSharesTruncated(delegation.GetShares())
+		found := k.HasDelegatorStartingInfo(ctx, val, del)
+		if found {
+			existingInfo := k.GetDelegatorStartingInfo(ctx, val, del)
+			existingInfo.Stake = currentStake
+			existingInfo.PreviousPeriod = previousPeriod
+			k.SetDelegatorStartingInfo(ctx, val, del, existingInfo)
+
+		} else {
+			k.SetDelegatorStartingInfo(ctx, val, del, types.NewDelegatorStartingInfo(previousPeriod, currentStake, uint64(ctx.BlockHeight()), sdk.ZeroDec()))
+		}
 	}
 }
 
@@ -69,7 +69,7 @@ func (k Keeper) calculateDelegationRewardsBetween(ctx sdk.Context, val stakingty
 
 // calculate the total rewards accrued by a delegation
 func (k Keeper) CalculateDelegationRewards(ctx sdk.Context, val stakingtypes.ValidatorI, del stakingtypes.DelegationI, endingPeriod uint64) (rewards sdk.DecCoins) {
-	if !k.HasDelegatorStartingInfo(ctx, del.GetValidatorAddr(), del.GetDelegatorAddr()) {
+	if !sdk.IsLazyDistributionEnabled(ctx) && !k.HasDelegatorStartingInfo(ctx, del.GetValidatorAddr(), del.GetDelegatorAddr()) {
 		return
 	}
 	// fetch starting info for delegation
@@ -80,23 +80,24 @@ func (k Keeper) CalculateDelegationRewards(ctx sdk.Context, val stakingtypes.Val
 		return
 	}
 
-	baseDenom, _ := sdk.GetBaseDenom()
-	if baseDenom == "" {
-		baseDenom = sdk.DefaultBondDenom
+	if !sdk.IsLazyDistributionEnabled(ctx) {
+		baseDenom, _ := sdk.GetBaseDenom()
+		if baseDenom == "" {
+			baseDenom = sdk.DefaultBondDenom
+		}
+
+		// calculate rewards from starting period (0)
+		// CYSIC rewards CYS by CC and delegate stCYS
+		cumulativeRewards := sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}
+
+		rewardsCoins, _ := cumulativeRewards.TruncateDecimal()
+		if rewardsCoins.IsZero() {
+			return
+		}
+
+		return cumulativeRewards
 	}
 
-	// calculate rewards from starting period (0)
-	// CYSIC rewards CYS by CC and delegate stCYS
-	cumulativeRewards := sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}
-
-	rewardsCoins, _ := cumulativeRewards.TruncateDecimal()
-	if rewardsCoins.IsZero() {
-		return
-	}
-
-	return cumulativeRewards
-
-	/* Note: This function is currently not used.
 	startingPeriod := startingInfo.PreviousPeriod
 	stake := startingInfo.Stake
 
@@ -168,8 +169,17 @@ func (k Keeper) CalculateDelegationRewards(ctx sdk.Context, val stakingtypes.Val
 
 	// calculate rewards for final period
 	rewards = rewards.Add(k.calculateDelegationRewardsBetween(ctx, val, startingPeriod, endingPeriod, stake)...)
+
+	// Preserve pre-fork accrued rewards tracked in CumulativeRewards.
+	if !startingInfo.CumulativeRewards.IsZero() {
+		baseDenom, _ := sdk.GetBaseDenom()
+		if baseDenom == "" {
+			baseDenom = sdk.DefaultBondDenom
+		}
+		rewards = rewards.Add(sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}...)
+	}
+
 	return rewards
-	*/
 }
 
 func (k Keeper) withdrawDelegationRewards(ctx sdk.Context, val stakingtypes.ValidatorI, del stakingtypes.DelegationI) (sdk.Coins, error) {
@@ -178,76 +188,77 @@ func (k Keeper) withdrawDelegationRewards(ctx sdk.Context, val stakingtypes.Vali
 		return nil, types.ErrEmptyDelegationDistInfo
 	}
 
-	valAddr := del.GetValidatorAddr()
-	delAddr := del.GetDelegatorAddr()
+	if !sdk.IsLazyDistributionEnabled(ctx) {
+		valAddr := del.GetValidatorAddr()
+		delAddr := del.GetDelegatorAddr()
 
-	// end current period and calculate rewards
-	endingPeriod := k.IncrementValidatorPeriod(ctx, val)
-	_ = k.CalculateDelegationRewards(ctx, val, del, endingPeriod)
+		// end current period and calculate rewards
+		endingPeriod := k.IncrementValidatorPeriod(ctx, val)
+		_ = k.CalculateDelegationRewards(ctx, val, del, endingPeriod)
 
-	outstandingRewards := k.GetValidatorOutstandingRewards(ctx, valAddr)
+		outstandingRewards := k.GetValidatorOutstandingRewards(ctx, valAddr)
 
-	// get delegator starting info
-	startingInfo := k.GetDelegatorStartingInfo(ctx, valAddr, delAddr)
+		// get delegator starting info
+		startingInfo := k.GetDelegatorStartingInfo(ctx, valAddr, delAddr)
 
-	baseDenom, _ := sdk.GetBaseDenom()
-	if baseDenom == "" {
-		baseDenom = sdk.DefaultBondDenom
-	}
+		baseDenom, _ := sdk.GetBaseDenom()
+		if baseDenom == "" {
+			baseDenom = sdk.DefaultBondDenom
+		}
 
-	// calculate rewards from starting period (0)
-	// CYSIC rewards CYS by CC and delegate stCYS
-	rewards := sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}
+		// calculate rewards from starting period (0)
+		// CYSIC rewards CYS by CC and delegate stCYS
+		rewards := sdk.DecCoins{sdk.NewDecCoinFromDec(baseDenom, startingInfo.CumulativeRewards)}
 
-	if rewards.IsAnyNegative() {
-		rewards = sdk.DecCoins{sdk.NewDecCoin(baseDenom, sdk.ZeroInt())}
-	}
+		if rewards.IsAnyNegative() {
+			rewards = sdk.DecCoins{sdk.NewDecCoin(baseDenom, sdk.ZeroInt())}
+		}
 
-	// convert calculated rewards to sdk.Coins and return to delegator
-	rewardsCoins, _ := rewards.TruncateDecimal()
+		// convert calculated rewards to sdk.Coins and return to delegator
+		rewardsCoins, _ := rewards.TruncateDecimal()
 
-	if rewardsCoins.IsZero() {
-		k.Logger(ctx).Error(fmt.Sprintf("Delegator %s has zero rewards on validator %s", delAddr, valAddr))
+		if rewardsCoins.IsZero() {
+			k.Logger(ctx).Error(fmt.Sprintf("Delegator %s has zero rewards on validator %s", delAddr, valAddr))
+			return rewardsCoins, nil
+		}
+
+		for _, rewardCoin := range rewards {
+			outstandingRewardAmount := outstandingRewards.Rewards.AmountOf(rewardCoin.Denom)
+			if outstandingRewardAmount.LT(rewardCoin.Amount) {
+				k.Logger(ctx).Error(fmt.Sprintf("Validator %s has insufficient outstanding rewards to pay delegator %s - %s < %s", valAddr, delAddr, outstandingRewardAmount, rewardCoin))
+				return nil, sdkerrors.Wrapf(sdkerrors.ErrInsufficientFunds, "insufficient validator rewards for denom %s", rewardCoin.Denom)
+			}
+		}
+
+		// update validator's remaining rewards
+		outstandingRewards.Rewards = outstandingRewards.Rewards.Sub(rewards)
+		k.SetValidatorOutstandingRewards(ctx, del.GetValidatorAddr(), outstandingRewards)
+
+		// send rewards to delegator
+		withdrawAddr := k.GetDelegatorWithdrawAddr(ctx, del.GetDelegatorAddr())
+		if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, withdrawAddr, rewardsCoins); err != nil {
+			return nil, err
+		}
+
+		// decrement reference count of starting period
+		startingPeriod := startingInfo.PreviousPeriod
+		k.decrementReferenceCount(ctx, del.GetValidatorAddr(), startingPeriod)
+
+		// clear delegator starting info
+		k.DeleteDelegatorStartingInfo(ctx, valAddr, delAddr)
+
+		ctx.EventManager().EmitEvent(
+			sdk.NewEvent(
+				types.EventTypeWithdrawRewards,
+				sdk.NewAttribute(sdk.AttributeKeyAmount, rewardsCoins.String()),
+				sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator().String()),
+				sdk.NewAttribute(types.AttributeKeyDelegator, del.GetDelegatorAddr().String()),
+			),
+		)
+
 		return rewardsCoins, nil
 	}
 
-	for _, rewardCoin := range rewards {
-		outstandingRewardAmount := outstandingRewards.Rewards.AmountOf(rewardCoin.Denom)
-		if outstandingRewardAmount.LT(rewardCoin.Amount) {
-			k.Logger(ctx).Error(fmt.Sprintf("Validator %s has insufficient outstanding rewards to pay delegator %s - %s < %s", valAddr, delAddr, outstandingRewardAmount, rewardCoin))
-			return nil, sdkerrors.Wrapf(sdkerrors.ErrInsufficientFunds, "insufficient validator rewards for denom %s", rewardCoin.Denom)
-		}
-	}
-
-	// update validator's remaining rewards
-	outstandingRewards.Rewards = outstandingRewards.Rewards.Sub(rewards)
-	k.SetValidatorOutstandingRewards(ctx, del.GetValidatorAddr(), outstandingRewards)
-
-	// send rewards to delegator
-	withdrawAddr := k.GetDelegatorWithdrawAddr(ctx, del.GetDelegatorAddr())
-	if err := k.bankKeeper.SendCoinsFromModuleToAccount(ctx, types.ModuleName, withdrawAddr, rewardsCoins); err != nil {
-		return nil, err
-	}
-
-	// decrement reference count of starting period
-	startingPeriod := startingInfo.PreviousPeriod
-	k.decrementReferenceCount(ctx, del.GetValidatorAddr(), startingPeriod)
-
-	// clear delegator starting info
-	k.DeleteDelegatorStartingInfo(ctx, valAddr, delAddr)
-
-	ctx.EventManager().EmitEvent(
-		sdk.NewEvent(
-			types.EventTypeWithdrawRewards,
-			sdk.NewAttribute(sdk.AttributeKeyAmount, rewardsCoins.String()),
-			sdk.NewAttribute(types.AttributeKeyValidator, val.GetOperator().String()),
-			sdk.NewAttribute(types.AttributeKeyDelegator, del.GetDelegatorAddr().String()),
-		),
-	)
-
-	return rewardsCoins, nil
-
-	/* rewrite reward distribution logic, use period 0 instead of incrementing
 	// end current period and calculate rewards
 	endingPeriod := k.IncrementValidatorPeriod(ctx, val)
 	rewardsRaw := k.CalculateDelegationRewards(ctx, val, del, endingPeriod)
@@ -316,5 +327,4 @@ func (k Keeper) withdrawDelegationRewards(ctx sdk.Context, val stakingtypes.Vali
 	)
 
 	return finalRewards, nil
-	*/
 }
