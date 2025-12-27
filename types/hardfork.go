@@ -20,7 +20,7 @@ func GetHardforkConfig(chainID string) HardforkConfig {
 	if strings.HasPrefix(chainID, "cysicmint_4399-1") {
 		// mainnet config
 		return HardforkConfig{
-			LazyDistributionHeight: 235000,
+			LazyDistributionHeight: 234000,
 		}
 	}
 
