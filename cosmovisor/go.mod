@@ -1,6 +1,6 @@
 module github.com/cosmos/cosmos-sdk/cosmovisor
 
-go 1.18
+go 1.24
 
 require (
 	github.com/cosmos/cosmos-sdk v0.46.1
@@ -74,7 +74,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/jmhodges/levigo v1.0.0 // indirect
-	github.com/klauspost/compress v1.15.9 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
