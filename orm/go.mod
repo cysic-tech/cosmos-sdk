@@ -1,6 +1,6 @@
 module github.com/cosmos/cosmos-sdk/orm
 
-go 1.18
+go 1.23
 
 require (
 	cosmossdk.io/errors v1.0.0-beta.6
@@ -15,7 +15,7 @@ require (
 	google.golang.org/grpc v1.46.2
 	google.golang.org/protobuf v1.28.0
 	gotest.tools/v3 v3.2.0
-	pgregory.net/rapid v0.4.7
+	pgregory.net/rapid v1.3.0
 )
 
 require (
